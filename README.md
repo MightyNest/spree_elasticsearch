@@ -20,7 +20,6 @@ Bundle your dependencies and run the installation generator:
 
 ```shell
 bundle
-touch config/elasticsearch.yml # temporary install workaround
 bundle exec rails g spree_elasticsearch:install
 ```
 
