@@ -16,6 +16,10 @@ module Spree
       indexes :sku, type: 'string', index: 'not_analyzed'
       indexes :taxon_ids, type: 'string', index: 'not_analyzed'
       indexes :properties, type: 'string', index: 'not_analyzed'
+      indexes :classifications, type: 'nested', include_in_parent: true do
+        indexes :taxon_id, type: 'integer'
+        indexes :position, type: 'integer'
+      end
     end
 
     def as_indexed_json(options={})
@@ -35,6 +39,13 @@ module Spree
       })
       result[:properties] = property_list unless property_list.empty?
       result[:taxon_ids] = taxons.map(&:self_and_ancestors).flatten.uniq.map(&:id) unless taxons.empty?
+      result[:classifications] = taxons.map do |t|
+        classification = classifications.find_by(taxon_id: t.id)
+        {
+          taxon_id: t.id,
+          position: classification.try(:position) || 1000
+        }
+      end if taxons.any?
       result
     end
 
@@ -81,7 +92,8 @@ module Spree
       # }
       def to_hash
         q = { match_all: {} }
-        unless query.blank? # nil or empty
+        has_keywords = !query.blank?
+        if has_keywords # nil or empty
           q = { query_string: { query: query, fields: ['name^5','description','sku'], default_operator: 'AND', use_dis_max: true } }
         end
         query = q
@@ -109,7 +121,27 @@ module Spree
         when "score"
           [ "_score", {"name.untouched" => { order: "asc" }}, {"price" => { order: "asc" }} ]
         else
-          [ {"name.untouched" => { order: "asc" }}, {"price" => { order: "asc" }}, "_score" ]
+          if has_keywords
+            [ "_score", {"name.untouched" => { order: "asc" }}, {"price" => { order: "asc" }} ]
+          else
+            [
+              {
+                "classifications.position" => {
+                  order: "asc",
+                  nested_filter: {
+                    terms: {
+                      "classifications.taxon_id" => taxons
+                    }
+                  }
+                }
+              },
+              {
+                "name" => {
+                  order: "asc"
+                }
+              }
+            ]
+          end
         end
 
         # facets
